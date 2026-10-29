@@ -1,5 +1,10 @@
 # 车来了 MCP
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
+[![MCP](https://img.shields.io/badge/MCP-1.6+-green.svg)](https://modelcontextprotocol.io)
+[![Upstream](https://img.shields.io/badge/fork_of-PeanutSplash%2Fchelaile--mcp-blue.svg)](https://github.com/PeanutSplash/chelaile-mcp)
+
 一个基于 MCP 的车来了实时公交服务器，让大语言模型可以查询国内的公交、地铁实时数据 —— 包括线路时刻表、车辆实时位置、附近站点、关键词搜索、以及公交+地铁的换乘路线规划。
 
 回答 "我的公交还有多久到站" 这类问题。**无需登录、无需任何账号配置**，开箱即用。
@@ -42,8 +47,6 @@ cd chelaile-mcp
 bun install
 npm run build
 ```
-
-> 仓库当前为私有仓库，克隆前需先完成 GitHub 认证（SSH key 或 PAT）。
 
 然后在 MCP 客户端里指向 `dist/index.js` 的绝对路径：
 
