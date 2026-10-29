@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 上游仓库
+    url: https://github.com/PeanutSplash/chelaile-mcp/issues
+    about: 上游功能建议、与上游同步的问题，请到 PeanutSplash/chelaile-mcp 提交
+  - name: Model Context Protocol
+    url: https://github.com/modelcontextprotocol/modelcontextprotocol/discussions
+    about: MCP 协议本身的问题

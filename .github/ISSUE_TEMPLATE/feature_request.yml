@@ -1,0 +1,42 @@
+name: 功能建议
+description: 提出新的工具能力或对现有工具的改进
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 你想用这个 MCP server 完成什么，但目前做不到？
+      placeholder: 我想知道某条线路今天剩下的所有班次，而不只是下一班
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的接口
+      description: 建议的工具名、入参与返回结构
+      render: json
+      placeholder: |
+        bus_get_line_schedule {
+          "city_id": "034",
+          "line_id": "<lineId>",
+          "date": "2026-01-01"
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的替代方案
+      description: 有没有更简单的做法，比如用现有工具组合实现？
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 补充说明
+      options:
+        - label: 该功能在上游仓库中也已提出
+        - label: 这是一个通用的 MCP 需求，不限于公交场景

@@ -1,0 +1,40 @@
+name: 上游接口变更
+description: 车来了上游接口的字段、签名或可用性发生了变化
+title: "[upstream] "
+labels: ["upstream"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        上游车来了接口不是公开 API，随时可能变更。
+        如果所有工具同时大面积返回 `status:400` 或空结果，多半是这个原因，而不是本 fork 的 bug。
+
+  - type: input
+    id: endpoint
+    attributes:
+      label: 受影响的接口
+      description: 例如 `bus/line!preStartTimetableNew.action`
+      placeholder: bus/line!preStartTimetableNew.action
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: 观察到的变化
+      description: 字段增删改名、签名失效、返回空、HTTP 状态码变化等
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: 响应样本
+      description: 如果可以，贴一小段脱敏后的原始响应
+      render: json
+
+  - type: input
+    id: since
+    attributes:
+      label: 大致从什么时候开始
+      placeholder: "2026-01-01 前后"

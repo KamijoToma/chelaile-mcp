@@ -2,6 +2,18 @@
   "name": "chelaile-mcp",
   "version": "1.2.0",
   "description": "MCP server for Chelaile realtime bus data (fork with full-day first-stop departure predictions)",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "bus",
+    "metro",
+    "transit",
+    "public-transport",
+    "realtime",
+    "chelaile",
+    "china"
+  ],
+  "author": "SkyRain <45686989+KamijoToma@users.noreply.github.com>",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

@@ -1,0 +1,83 @@
+name: Bug 报告
+description: 工具行为与预期不符，或上游返回了意料之外的数据
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请勿在此粘贴真实的个人坐标、IP 或住址 —— 换成大致位置即可复现。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 本 fork 的版本号（见 `package.json` 的 `version`），或你使用的 commit
+      placeholder: "1.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: tool
+    attributes:
+      label: 相关工具
+      description: 哪个工具出的问题，例如 `bus_get_timetable`
+      placeholder: bus_get_timetable
+    validations:
+      required: true
+
+  - type: textarea
+    id: params
+    attributes:
+      label: 调用参数
+      description: 完整的工具入参 JSON（坐标可做粗略近似）
+      render: json
+      placeholder: |
+        {
+          "city_id": "034",
+          "line_id": "<lineId>",
+          "line_no": "<lineNo>",
+          "direction": "1"
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+      description: 你认为工具应该返回什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 工具实际返回的内容（markdown 模式贴文本，json 模式贴 JSON）
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 错误信息 / 日志
+      description: stderr 中的错误堆栈或 `Error:` 文本
+      render: shell
+
+  - type: input
+    id: client
+    attributes:
+      label: MCP 客户端
+      description: 例如 Claude Code、Cursor、VS Code
+      placeholder: Claude Code
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 补充说明
+      options:
+        - label: 该问题在上游仓库中也能复现
+        - label: 该问题只在上游最新版本出现
+        - label: 我已确认使用的是本 fork 的最新代码
