@@ -4,52 +4,42 @@
 
 回答 "我的公交还有多久到站" 这类问题。**无需登录、无需任何账号配置**，开箱即用。
 
-[![npm version](https://img.shields.io/npm/v/chelaile-mcp-server?color=cb3837&logo=npm)](https://www.npmjs.com/package/chelaile-mcp-server)
-[![Install in Cursor](https://img.shields.io/badge/Cursor-一键安装-000000?style=flat-square&logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=chelaile&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImNoZWxhaWxlLW1jcC1zZXJ2ZXIiXX0=)
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-一键安装-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%22chelaile%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22chelaile-mcp-server%22%5D%7D)
-[![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-一键安装-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](vscode-insiders:mcp/install?%7B%22name%22%3A%22chelaile%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22chelaile-mcp-server%22%5D%7D)
+> Fork of [PeanutSplash/chelaile-mcp](https://github.com/PeanutSplash/chelaile-mcp)，修复了
+> `bus_get_timetable` 在服务日尾部查不到班次的问题，见[下文](#发车预测说明本-fork-的改动)。
 
 ## 安装
 
-### 一键安装
-
-点击上面的徽章即可在 Cursor / VS Code / VS Code Insiders 中一键安装。
-
-### 在 Claude Code 中使用
+本 fork 未发布到 npm，直接从 GitHub 构建（仓库为私有，需先完成 GitHub 认证）：
 
 ```bash
-claude mcp add chelaile -- npx -y chelaile-mcp-server
+git clone https://github.com/KamijoToma/chelaile-mcp.git
+cd chelaile-mcp
+bun install
+npm run build
 ```
 
-或者手动编辑 `~/.claude/mcp_servers.json`（或项目级的 `.mcp.json`）：
+然后在 MCP 客户端里指向 `dist/index.js` 的绝对路径：
 
 ```json
 {
   "mcpServers": {
     "chelaile": {
-      "command": "npx",
-      "args": ["-y", "chelaile-mcp-server"]
+      "command": "node",
+      "args": ["/absolute/path/to/chelaile-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-### 在 Claude Desktop 中使用
+Claude Code 等价写法：
 
-编辑 `~/Library/Application Support/Claude/claude_desktop_config.json`：
-
-```json
-{
-  "mcpServers": {
-    "chelaile": {
-      "command": "npx",
-      "args": ["-y", "chelaile-mcp-server"]
-    }
-  }
-}
+```bash
+claude mcp add chelaile -- node /absolute/path/to/chelaile-mcp/dist/index.js
 ```
 
-重启对应客户端后，工具会以 `chelaile` 为前缀出现。
+也可以先 `npm link`，之后直接 `chelaile-mcp` 启动。
+
+重启客户端后，工具会以 `chelaile` 为前缀出现。
 
 ## 工具一览
 
@@ -80,7 +70,16 @@ claude mcp add chelaile -- npx -y chelaile-mcp-server
 上游 `bus/line!preStartTimetableNew.action` 有两个坑，原版都没处理：
 
 1. 传入 `tabType=0` 会让上游**只返回当天预测**，屏蔽另外两份完整数据。
-2. 当天预测只覆盖服务日的前 ~80%（实测末班 21:00 的线路，预测只到 17:35）。
+2. 当天预测只覆盖**未来约 1.5–2 小时的滚动窗口**，服务日尾部（如 21:00 末班）永远不在其中。
+
+实测同一线路不同时刻的窗口末端：
+
+| 查询时刻 | 当天预测班数 | 当天预测末班 | 官方末班 |
+| --- | --- | --- | --- |
+| 16:02 | 31 | 17:35 | 21:00 |
+| 18:10 | 35 | 20:00 | 21:00 |
+
+窗口随当前时间前移，所以「19:10 之后下一班」在下午查不到、在傍晚查得到 —— 但**回答必须一致**，不能取决于查询时刻。
 
 本 fork 的处理：
 
@@ -88,7 +87,7 @@ claude mcp add chelaile -- npx -y chelaile-mcp-server
   `beforeYesterdayTimetable`，即前两个服务日的**完整实际班次**（到 21:00）。
 - 解析上游嵌套结构 `timetable.timetable[]`（原版用 `Array.isArray` 判断，恒为 `null`）。
 - 新增 `at_time` 参数，按「指定时刻之后的第一班」计算 `nextDeparture`；
-  当天预测不够时自动回落到昨日实际班次，并用 `nextDepartureSource` 标明来源。
+  当天预测够不到时自动回落到昨日实际班次，`nextDepartureSource` 标明数据来源。
 
 ### 示例
 
@@ -97,15 +96,28 @@ claude mcp add chelaile -- npx -y chelaile-mcp-server
 //                     direction: "1", at_time: "19:10" }
 {
   "nextDeparture": "20:00",
-  "nextDepartureSource": "yesterday-actual",
-  "lastPredictedDeparture": "17:35",
-  "firstStopDepartures": ["06:30", "06:45", "...", "17:15", "17:35"],
+  "nextDepartureSource": "yesterday-actual",   // 或 today-prediction，见下表
+  "lastPredictedDeparture": "20:00",
   "yesterdayDepartures": ["06:30", "...", "19:10", "20:00", "21:00"],
   "segments": [{ "fromTime": "06:30", "toTime": "10:00", "intervalMin": 18 }]
 }
 ```
 
-即：该方向 19:10 之后的第一班发车是 **20:00**。
+「19:10 之后第一班 = 20:00」这个结论稳定，只有来源标签随查询时刻变化
+（当天预测是滚动窗口，覆盖到哪算到哪）：
+
+| 查询时刻 | 当天预测末班 | `nextDeparture` | `nextDepartureSource` |
+| --- | --- | --- | --- |
+| 16:02 | 17:35 | 20:00 | `yesterday-actual` |
+| 18:10 | 20:00 | 20:00 | `today-prediction` |
+
+`at_time` 超出所有数据覆盖范围时返回 `null` 而非猜一个值：
+
+| `at_time` | `nextDeparture` |
+| --- | --- |
+| `05:00` | `06:30`（今日首班） |
+| `20:30` | `21:00`（昨日末班） |
+| `21:30` | `null`（已过末班） |
 
 不传 `at_time` 时按当前北京时间取下一班。
 

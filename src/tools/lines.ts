@@ -395,8 +395,9 @@ interface LeanTimetable {
   segments: TimetableSegmentView[];
   /**
    * Next departure at/after now (Beijing time). Uses today's predictions when
-   * they extend past now, otherwise yesterday's actual schedule — today's
-   * predictions stop well before end of service.
+   * the rolling window still covers it, otherwise the previous service day's
+   * actual schedule — today's predictions track a ~2h horizon, so the last
+   * trip of the day is never predicted.
    */
   nextDeparture?: string;
   /** Which source `nextDeparture` came from. */
@@ -598,9 +599,9 @@ export function reshapeTimetable(
   // departure from now" may include the current minute.
   const after = (times: string[]): string | undefined =>
     atTime ? times.find((t) => t > reference) : times.find((t) => t >= reference);
-  // Today's predictions stop well before end of service (upstream only
-  // extrapolates the first ~80% of the day), so a late-evening query has to
-  // fall back to the previous service day's actual departures.
+  // Today's prediction is a rolling ~2h horizon, so the tail of the service
+  // day (the last trip) is never in it. Fall back to the previous service
+  // day's actual departures to answer late-evening queries consistently.
   const fromToday = after(todayTrips);
   const fromHistory = after(yesterdayTrips) ?? after(dayBeforeTrips);
   const nextDeparture = fromToday ?? fromHistory;
@@ -1064,7 +1065,7 @@ Returns (json):
       title: "Get first-stop departure predictions (incl. late-evening trips)",
       description: `Per-trip departures from the line's FIRST stop — answers "when does the next bus leave the origin terminal".
 
-Today's predicted departures only cover the earlier part of the service day (upstream extrapolates from recent history and stops well before the last trip). This tool therefore also returns \`yesterdayDepartures\` / \`dayBeforeDepartures\`, the previous two service days' complete actual schedules, and resolves \`nextDeparture\` against them so late-evening queries still get an answer.
+Today's predicted departures are a rolling window covering only roughly the next two hours, so the last trip of the service day is never included. This tool therefore also returns \`yesterdayDepartures\` / \`dayBeforeDepartures\`, the previous two service days' complete actual schedules, and resolves \`nextDeparture\` against them so late-evening queries still get an answer.
 
 Pass \`at_time\` ("HH:MM", Beijing time) to ask "what is the next departure after 19:10" instead of using the current clock.
 
@@ -1082,8 +1083,8 @@ Returns (json):
     "mode": "scheduled",
     "nextDeparture": "20:00",
     "nextDepartureSource": "yesterday-actual",
-    "lastPredictedDeparture": "17:35",
-    "firstStopDepartures": ["06:30", "06:45", ...],
+    "lastPredictedDeparture": "20:00",
+    "firstStopDepartures": ["06:30", "06:45", "..."],
     "segments": [{ "fromTime":"06:30", "toTime":"10:00", "intervalMin":18, "departures":[...] }, ...],
     "yesterdayDepartures": ["06:30", ..., "21:00"],
     "dayBeforeDepartures": ["06:30", ..., "20:59"],

@@ -10,8 +10,8 @@ import { registerStopTools } from "./tools/stops.js";
 import { registerTransitTools } from "./tools/transit.js";
 
 const server = new McpServer({
-  name: "chelaile-mcp-server",
-  version: "1.0.0",
+  name: "chelaile-mcp",
+  version: "1.2.0",
 });
 
 registerCityTools(server);
@@ -24,7 +24,7 @@ registerTransitTools(server);
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("chelaile-mcp-server running on stdio");
+  console.error("chelaile-mcp running on stdio");
 }
 
 main().catch((error) => {

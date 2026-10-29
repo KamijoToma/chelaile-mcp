@@ -1,11 +1,11 @@
 {
-  "name": "chelaile-mcp-server",
-  "version": "1.1.0",
-  "description": "MCP server for Chelaile realtime bus data",
+  "name": "chelaile-mcp",
+  "version": "1.2.0",
+  "description": "MCP server for Chelaile realtime bus data (fork with full-day first-stop departure predictions)",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "chelaile-mcp-server": "dist/index.js"
+    "chelaile-mcp": "dist/index.js"
   },
   "files": [
     "dist"
@@ -37,5 +37,13 @@
     "release-it": "^20.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KamijoToma/chelaile-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KamijoToma/chelaile-mcp/issues"
+  },
+  "homepage": "https://github.com/KamijoToma/chelaile-mcp#readme"
 }

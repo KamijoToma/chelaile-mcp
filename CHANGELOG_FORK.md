@@ -6,8 +6,8 @@
 
 ### 问题
 
-原版对一条首班 06:30 / 末班 21:00 的线路只返回当天预测到 16:55，
-19:10 之后最早的一班（20:00）完全查不到。
+原版对一条首班 06:30 / 末班 21:00 的线路在下午查询时，
+19:10 之后最早的一班（20:00）完全查不到 —— 当天预测的滚动窗口够不到。
 
 两个独立缺陷叠加：
 
@@ -19,9 +19,12 @@
 
 | key | 内容 | dir=1 实测 |
 | --- | --- | --- |
-| `timetable` | 当天预测 | 31 班，末班 17:35 |
+| `timetable` | 当天预测（滚动 ~2h） | 31 班，末班 17:35（16:02 实测）|
 | `yesterdayTimetable` | 昨日实际 | 36 班，末班 **21:00** |
 | `beforeYesterdayTimetable` | 前日实际 | 36 班，末班 **20:59** |
+
+当天预测是**滚动窗口**（约未来 1.5–2 小时），16:02 查时末班 17:35，18:10 查时末班 20:00；
+官方末班 21:00 始终不在窗口内。所以不传 `tabType` 拿到的前两日完整班次是必需的。
 
 **缺陷 2 — 解析形状错误。**
 `timetable` 是对象 `{depTitle, nearDepTime, timetable: [...]}`，
@@ -52,20 +55,22 @@ $ bus_get_timetable { city_id:"<cityId>", line_id:"<lineId>",
                       line_no:"<lineNo>", direction:"1", at_time:"19:10" }
 {
   "nextDeparture": "20:00",
-  "nextDepartureSource": "yesterday-actual",
-  "lastPredictedDeparture": "17:35",
+  "nextDepartureSource": "today-prediction" | "yesterday-actual",
+  "lastPredictedDeparture": "20:00",
   "yesterdayDepartures": ["06:30", ..., "19:10", "20:00", "21:00"]
 }
 ```
+
+`nextDeparture` 恒为 20:00，`nextDepartureSource` 依当天预测窗口覆盖范围变化。
 
 边界：
 
 | `at_time` | `nextDeparture` | 来源 |
 | --- | --- | --- |
 | 05:00 | 06:30 | today-prediction |
-| 19:10 | 20:00 | yesterday-actual |
+| 19:10 | 20:00 | today-prediction 或 yesterday-actual |
 | 20:30 | 21:00 | yesterday-actual |
-| 21:30 | （无） | 已过末班 |
+| 21:30 | `null` | 已过末班 |
 
 ### 测试
 
