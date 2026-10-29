@@ -40,6 +40,7 @@ import type {
   StopDetailResponse,
   TimetableResponse,
 } from "../../src/types.js";
+import { reshapeTimetable } from "../../src/tools/lines.js";
 
 const SHANGHAI = "034";
 const LAT = "31.230416"; // 人民广场, WGS-84
@@ -593,10 +594,17 @@ describe.skipIf(skip)("Chelaile e2e — upstream schema contract", () => {
           lineId: ctx.lineId,
           lineNo: ctx.lineNo,
           direction: String(ctx.direction),
-          tabType: "0",
         },
       );
       TimetableSchema.parse(data);
+      const lean = reshapeTimetable(data);
+      expect(
+        lean.firstStopDepartures.length + lean.yesterdayDepartures.length,
+      ).toBeGreaterThan(0);
+      if (lean.nextDeparture) {
+        expect(lean.nextDeparture).toMatch(/^\d{2}:\d{2}$/);
+        expect(lean.nextDepartureSource).toBeDefined();
+      }
     },
     20000,
   );

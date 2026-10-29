@@ -67,11 +67,47 @@ claude mcp add chelaile -- npx -y chelaile-mcp-server
 | `bus_get_line_route`    | 某线路的地图轨迹坐标                    |
 | `bus_get_line_realtime` | 某线路即将到达某站点的车辆实时信息      |
 | `bus_list_line_buses`   | 某线路上所有车辆的位置与载客率          |
-| `bus_get_timetable`     | 首末班、发车间隔或完整时刻表            |
+| `bus_get_timetable`     | 首站发车预测（含末班车，支持 `at_time` 查指定时刻后的下一班） |
 | `bus_refresh_lines`     | 一次性批量刷新多个 (线路, 站点) 对      |
 | `bus_plan_transit`      | 两个 GCJ-02 坐标之间的公交+地铁换乘规划 |
 
 每个工具都支持 `response_format: "markdown" | "json"`（默认 `markdown`），返回 JSON 时同时附带 `structuredContent`。
+
+## 发车预测说明（本 fork 的改动）
+
+`bus_get_timetable` 回答「始发站下一班几点发车」。
+
+上游 `bus/line!preStartTimetableNew.action` 有两个坑，原版都没处理：
+
+1. 传入 `tabType=0` 会让上游**只返回当天预测**，屏蔽另外两份完整数据。
+2. 当天预测只覆盖服务日的前 ~80%（实测末班 21:00 的线路，预测只到 17:35）。
+
+本 fork 的处理：
+
+- **不再传 `tabType`** —— 上游因此额外返回 `yesterdayTimetable` /
+  `beforeYesterdayTimetable`，即前两个服务日的**完整实际班次**（到 21:00）。
+- 解析上游嵌套结构 `timetable.timetable[]`（原版用 `Array.isArray` 判断，恒为 `null`）。
+- 新增 `at_time` 参数，按「指定时刻之后的第一班」计算 `nextDeparture`；
+  当天预测不够时自动回落到昨日实际班次，并用 `nextDepartureSource` 标明来源。
+
+### 示例
+
+```jsonc
+// bus_get_timetable { city_id: "<cityId>", line_id: "<lineId>", line_no: "<lineNo>",
+//                     direction: "1", at_time: "19:10" }
+{
+  "nextDeparture": "20:00",
+  "nextDepartureSource": "yesterday-actual",
+  "lastPredictedDeparture": "17:35",
+  "firstStopDepartures": ["06:30", "06:45", "...", "17:15", "17:35"],
+  "yesterdayDepartures": ["06:30", "...", "19:10", "20:00", "21:00"],
+  "segments": [{ "fromTime": "06:30", "toTime": "10:00", "intervalMin": 18 }]
+}
+```
+
+即：该方向 19:10 之后的第一班发车是 **20:00**。
+
+不传 `at_time` 时按当前北京时间取下一班。
 
 ## License
 

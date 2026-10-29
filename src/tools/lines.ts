@@ -85,6 +85,13 @@ export const TimetableInput = z
         "Rider-facing short name (search.lines[].name), e.g. '71'. NOT the internal lineNo like 'r95817'.",
       ),
     direction: z.enum(["0", "1"]),
+    at_time: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Must be 'HH:MM' in 24h Beijing time")
+      .optional()
+      .describe(
+        "Answer 'what is the next departure after this time' instead of using the current clock. Useful for planning a later trip, e.g. '19:10'.",
+      ),
     response_format: ResponseFormatSchema,
   })
   .strict();
@@ -195,10 +202,73 @@ interface RawLineRouteResponse {
   route?: Array<{ lat: number; lng: number; stopOrder?: number }>;
 }
 
+// `preStartTimetableNew` returns the trip data nested one level down:
+//   { depTitle, nearDepTime, timetable: [{ fTime, eTime, depInterval,
+//     schedules: [{ time }] }] }
+// and, when `tabType` is omitted, two extra full-day histories
+// (`yesterdayTimetable` / `beforeYesterdayTimetable`) whose segments carry the
+// real end-of-service departures. Passing `tabType=0` suppresses those, which
+// is why the upstream tool frequently reports no data for late-evening trips.
+interface TripSegment {
+  fTime?: string;
+  eTime?: string;
+  depInterval?: number;
+  depIntervalTips?: string;
+  schedules?: Array<{ time?: string }>;
+  times?: string[];
+}
+
+interface TimetableBlock {
+  depTitle?: string;
+  depDesc?: string;
+  nearDepTime?: string;
+  state?: number;
+  timetable?: TripSegment[];
+}
+
+function asTimetableBlock(value: unknown): TimetableBlock | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value instanceof Object ? (value as TimetableBlock) : null;
+}
+
+function blockSegments(block: TimetableBlock | null): TripSegment[] {
+  const segs = block?.timetable;
+  return Array.isArray(segs) ? segs : [];
+}
+
+function segmentTimes(segment: TripSegment): string[] {
+  const fromSchedules = (segment.schedules ?? [])
+    .map((s) => s.time ?? "")
+    .filter(Boolean);
+  if (fromSchedules.length) return fromSchedules;
+  return (segment.times ?? []).filter(Boolean);
+}
+
+function blockDepartures(block: TimetableBlock | null): string[] {
+  return blockSegments(block).flatMap(segmentTimes).sort();
+}
+
+
+// Beijing wall-clock "HH:MM"; departure times from upstream are local.
+function beijingNowHHMM(): string {
+  return new Date()
+    .toLocaleTimeString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    .slice(0, 5);
+}
+
 interface RawTimetableResponse {
   line?: RawLineField;
   timeTableType?: number;
   timetable?: unknown;
+  /** Full-day actual departures from the previous service day. */
+  yesterdayTimetable?: unknown;
+  /** Full-day actual departures from two service days ago. */
+  beforeYesterdayTimetable?: unknown;
   scheduleTags?: unknown[];
 }
 
@@ -305,11 +375,40 @@ interface LeanLineRoute {
   points: Array<{ lat: number; lng: number; stopOrder?: number }>;
 }
 
+interface TimetableSegmentView {
+  fromTime: string;
+  toTime: string;
+  /** Headway in minutes; -1 when upstream does not report one (history days). */
+  intervalMin: number;
+  intervalTips?: string;
+  departures: string[];
+}
+
 interface LeanTimetable {
   line: Pick<LeanLine, "lineId" | "name" | "direction" | "startSn" | "endSn">;
   timeTableType: number;
   mode: "scheduled" | "interval" | "special" | "unknown";
   timetable: unknown[] | null;
+  /** Today's predicted first-stop departures, ascending "HH:MM". */
+  firstStopDepartures: string[];
+  /** Per-window view of today's predictions (headway + trips). */
+  segments: TimetableSegmentView[];
+  /**
+   * Next departure at/after now (Beijing time). Uses today's predictions when
+   * they extend past now, otherwise yesterday's actual schedule — today's
+   * predictions stop well before end of service.
+   */
+  nextDeparture?: string;
+  /** Which source `nextDeparture` came from. */
+  nextDepartureSource?: "today-prediction" | "yesterday-actual";
+  /** Last predicted departure of today (before fallback to history). */
+  lastPredictedDeparture?: string;
+  /** Yesterday's full-day actual departures, including the late-evening trips. */
+  yesterdayDepartures: string[];
+  /** Day-before-yesterday's full-day actual departures. */
+  dayBeforeDepartures: string[];
+  depTitle?: string;
+  depDesc?: string;
   note?: string;
 }
 
@@ -478,16 +577,48 @@ export function reshapeLineRoute(
   };
 }
 
-export function reshapeTimetable(raw: RawTimetableResponse): LeanTimetable {
+export function reshapeTimetable(
+  raw: RawTimetableResponse,
+  atTime?: string,
+): LeanTimetable {
   const type = raw.timeTableType ?? 0;
   const mode: LeanTimetable["mode"] =
     type === 1 ? "scheduled" : type === 2 ? "interval" : type === 3 ? "special" : "unknown";
+
+  const today = asTimetableBlock(raw.timetable);
+  const yesterday = asTimetableBlock(raw.yesterdayTimetable);
+  const dayBefore = asTimetableBlock(raw.beforeYesterdayTimetable);
+
+  const todayTrips = blockDepartures(today);
+  const yesterdayTrips = blockDepartures(yesterday);
+  const dayBeforeTrips = blockDepartures(dayBefore);
+
+  const reference = atTime ?? beijingNowHHMM();
+  // "the next departure after HH:MM" is strictly later, while "the next
+  // departure from now" may include the current minute.
+  const after = (times: string[]): string | undefined =>
+    atTime ? times.find((t) => t > reference) : times.find((t) => t >= reference);
+  // Today's predictions stop well before end of service (upstream only
+  // extrapolates the first ~80% of the day), so a late-evening query has to
+  // fall back to the previous service day's actual departures.
+  const fromToday = after(todayTrips);
+  const fromHistory = after(yesterdayTrips) ?? after(dayBeforeTrips);
+  const nextDeparture = fromToday ?? fromHistory;
+  const nextDepartureSource: LeanTimetable["nextDepartureSource"] = fromToday
+    ? "today-prediction"
+    : fromHistory
+      ? "yesterday-actual"
+      : undefined;
+
   const note =
     mode === "interval"
-      ? "This line runs at a fixed interval — the upstream does not return per-trip departure times. Use bus_get_line_detail to read firstTime/lastTime/price."
+      ? "This line runs at a fixed headway — the upstream does not return per-trip departure times. Use bus_get_line_detail to read firstTime/lastTime/price."
       : mode === "scheduled"
-        ? undefined
+        ? todayTrips.length === 0
+          ? "Upstream returned no per-trip times for today. yesterdayDepartures / dayBeforeDepartures may still hold the recent actual schedule."
+          : undefined
         : "Timetable type not recognised; fall back to bus_get_line_detail.";
+
   return {
     line: {
       lineId: raw.line?.lineId ?? "",
@@ -499,6 +630,21 @@ export function reshapeTimetable(raw: RawTimetableResponse): LeanTimetable {
     timeTableType: type,
     mode,
     timetable: Array.isArray(raw.timetable) ? raw.timetable : null,
+    firstStopDepartures: todayTrips,
+    segments: blockSegments(today).map((seg) => ({
+      fromTime: seg.fTime ?? "",
+      toTime: seg.eTime ?? "",
+      intervalMin: seg.depInterval ?? -1,
+      ...(seg.depIntervalTips ? { intervalTips: seg.depIntervalTips } : {}),
+      departures: segmentTimes(seg),
+    })),
+    nextDeparture,
+    ...(nextDepartureSource ? { nextDepartureSource } : {}),
+    ...(todayTrips.length ? { lastPredictedDeparture: todayTrips.at(-1) } : {}),
+    yesterdayDepartures: yesterdayTrips,
+    dayBeforeDepartures: dayBeforeTrips,
+    ...(today?.depTitle ? { depTitle: today.depTitle } : {}),
+    ...(today?.depDesc ? { depDesc: today.depDesc } : {}),
     note,
   };
 }
@@ -604,12 +750,33 @@ export function renderLineRoute(d: LeanLineRoute): string {
 export function renderTimetable(d: LeanTimetable): string {
   const lines = [
     `# Timetable for ${d.line.name} (${d.line.lineId})`,
-    `- direction: ${d.line.direction}`,
+    `- direction: ${d.line.direction} (${d.line.startSn} → ${d.line.endSn})`,
     `- mode: ${d.mode} (timeTableType=${d.timeTableType})`,
   ];
-  if (d.timetable && d.timetable.length) {
-    lines.push(`- ${d.timetable.length} schedule entr${d.timetable.length === 1 ? "y" : "ies"} (json mode to read)`);
+  if (d.nextDeparture) {
+    const src =
+      d.nextDepartureSource === "yesterday-actual"
+        ? "from yesterday's actual schedule — today's predictions do not cover this hour"
+        : "from today's predictions";
+    lines.push(`- next departure from first stop: **${d.nextDeparture}** (${src})`);
   }
+  if (d.segments.length) {
+    lines.push(`- today's predicted departures${d.depTitle ? ` (${d.depTitle})` : ""}:`);
+    for (const s of d.segments) {
+      const head =
+        s.intervalMin > 0
+          ? `${s.fromTime}–${s.toTime} every ${s.intervalMin}min`
+          : `${s.fromTime}–${s.toTime}`;
+      lines.push(`  - ${head}: ${s.departures.length ? s.departures.join(", ") : "(none)"}`);
+    }
+  }
+  if (d.yesterdayDepartures.length) {
+    lines.push(
+      `- yesterday's full-day actual departures (${d.yesterdayDepartures.length} trips, ends ${d.yesterdayDepartures.at(-1)}):`,
+      `  ${d.yesterdayDepartures.join(", ")}`,
+    );
+  }
+  if (d.depDesc) lines.push(`- note: ${d.depDesc.trim()}`);
   if (d.note) lines.push(`- ${d.note}`);
   return lines.join("\n");
 }
@@ -894,29 +1061,36 @@ Returns (json):
   server.registerTool(
     "bus_get_timetable",
     {
-      title: "Get a line's per-trip schedule (rarely useful)",
-      description: `Per-trip departure schedule for a line. The upstream returns one of three modes via \`mode\`:
-  - 'scheduled' (timeTableType=1): an explicit \`timetable\` array of trips
-  - 'interval' (timeTableType=2): the line runs at a fixed headway — NO per-trip times are returned
-  - 'special' / 'unknown' (timeTableType=3 or other)
+      title: "Get first-stop departure predictions (incl. late-evening trips)",
+      description: `Per-trip departures from the line's FIRST stop — answers "when does the next bus leave the origin terminal".
 
-**Most lines in Shanghai are 'interval'**, so this tool is rarely the right one. To answer "first/last bus", "is the line still running", or "what's the next departure", call **bus_get_line_detail** instead — it always returns firstTime / lastTime / price / live buses.
+Today's predicted departures only cover the earlier part of the service day (upstream extrapolates from recent history and stops well before the last trip). This tool therefore also returns \`yesterdayDepartures\` / \`dayBeforeDepartures\`, the previous two service days' complete actual schedules, and resolves \`nextDeparture\` against them so late-evening queries still get an answer.
+
+Pass \`at_time\` ("HH:MM", Beijing time) to ask "what is the next departure after 19:10" instead of using the current clock.
 
 Args:
   - city_id (string, required)
   - line_id (string, required)
-  - line_no (string, required): rider-facing short name from bus_search.lines[].name (e.g. '71'). Do NOT pass the internal lineNo like 'r95817'.
+  - line_no (string, required): rider-facing short name from bus_search.lines[].name (e.g. '71'). NOT the internal lineNo like 'r95817'.
   - direction ('0'|'1'): the line direction
+  - at_time ('HH:MM', optional): reference clock; defaults to now in Asia/Shanghai
   - response_format ('markdown' | 'json')
 
 Returns (json):
   {
-    "line": { "lineId":"...", "name":"71", "direction":0, "startSn":"...", "endSn":"..." },
-    "timeTableType": 2,
-    "mode": "interval",
-    "timetable": null,
-    "note": "This line runs at a fixed interval — ..."
-  }`,
+    "line": { "lineId":"...", "name":"71", "direction":1, "startSn":"...", "endSn":"..." },
+    "mode": "scheduled",
+    "nextDeparture": "20:00",
+    "nextDepartureSource": "yesterday-actual",
+    "lastPredictedDeparture": "17:35",
+    "firstStopDepartures": ["06:30", "06:45", ...],
+    "segments": [{ "fromTime":"06:30", "toTime":"10:00", "intervalMin":18, "departures":[...] }, ...],
+    "yesterdayDepartures": ["06:30", ..., "21:00"],
+    "dayBeforeDepartures": ["06:30", ..., "20:59"],
+    "depTitle": "首站发车预测"
+  }
+
+Some lines run at a fixed headway with no per-trip data (\`mode\`='interval'); for those use **bus_get_line_detail** to read firstTime/lastTime.`,
       inputSchema: TimetableInput.shape,
       annotations: {
         readOnlyHint: true,
@@ -935,10 +1109,9 @@ Returns (json):
             lineId: params.line_id,
             lineNo: params.line_no,
             direction: params.direction,
-            tabType: "0",
           },
         );
-        const lean = reshapeTimetable(raw);
+        const lean = reshapeTimetable(raw, params.at_time);
         return pickFormat(
           params.response_format as ResponseFormat,
           () => renderTimetable(lean),

@@ -384,22 +384,66 @@ describe("reshapeLineRoute", () => {
 });
 
 describe("reshapeTimetable", () => {
-  test("type=1 → mode=scheduled, no note", () => {
+  const block = (trips: string[]) => ({
+    depTitle: "首站发车预测",
+    timetable: [
+      {
+        fTime: trips[0],
+        eTime: trips.at(-1),
+        depInterval: 18,
+        schedules: trips.map((time) => ({ time })),
+      },
+    ],
+  });
+
+  test("parses the nested timetable block into segments and departures", () => {
     const out = reshapeTimetable({
       line: { lineId: "L1", name: "71", direction: 0 },
       timeTableType: 1,
-      timetable: [{ x: 1 }],
+      timetable: block(["06:30", "06:48", "07:06"]),
     });
     expect(out.mode).toBe("scheduled");
-    expect(out.timetable).toEqual([{ x: 1 }]);
-    expect(out.note).toBeUndefined();
+    expect(out.firstStopDepartures).toEqual(["06:30", "06:48", "07:06"]);
+    expect(out.segments).toEqual([
+      {
+        fromTime: "06:30",
+        toTime: "07:06",
+        intervalMin: 18,
+        departures: ["06:30", "06:48", "07:06"],
+      },
+    ]);
+    expect(out.lastPredictedDeparture).toBe("07:06");
+    expect(out.depTitle).toBe("首站发车预测");
   });
 
-  test("type=2 → mode=interval with interval note", () => {
+  test("falls back to yesterday's actual schedule when today's predictions have ended", () => {
+    const out = reshapeTimetable({
+      timeTableType: 1,
+      timetable: block(["00:01"]),
+      yesterdayTimetable: block(["23:58", "23:59"]),
+    });
+    expect(out.firstStopDepartures).toEqual(["00:01"]);
+    expect(out.yesterdayDepartures).toEqual(["23:58", "23:59"]);
+    expect(out.nextDepartureSource).toBe("yesterday-actual");
+    expect(out.nextDeparture).toBe("23:58");
+  });
+
+  test("prefers today's predictions when they still cover the current hour", () => {
+    const out = reshapeTimetable({
+      timeTableType: 1,
+      timetable: block(["00:00", "23:59"]),
+      yesterdayTimetable: block(["12:00"]),
+    });
+    expect(out.nextDepartureSource).toBe("today-prediction");
+    expect(out.nextDeparture).toBe("23:59");
+  });
+
+  test("type=2 → mode=interval with headway note", () => {
     const out = reshapeTimetable({ timeTableType: 2 });
     expect(out.mode).toBe("interval");
-    expect(out.note).toMatch(/fixed interval/);
+    expect(out.note).toMatch(/fixed headway/);
     expect(out.timetable).toBeNull();
+    expect(out.firstStopDepartures).toEqual([]);
   });
 
   test("type=3 → mode=special with fallback note", () => {
@@ -633,44 +677,57 @@ describe("renderLineRoute", () => {
 });
 
 describe("renderTimetable", () => {
-  test("renders mode + interval note", () => {
+  const base = {
+    line: { lineId: "L1", name: "71", direction: 0, startSn: "甲站", endSn: "乙站" },
+    timetable: null,
+    firstStopDepartures: [],
+    segments: [],
+    yesterdayDepartures: [],
+    dayBeforeDepartures: [],
+  };
+
+  test("renders mode + headway note", () => {
     const out = renderTimetable({
-      line: {
-        lineId: "L1",
-        name: "71",
-        direction: 0,
-        startSn: "",
-        endSn: "",
-      },
+      ...base,
       timeTableType: 2,
       mode: "interval",
-      timetable: null,
       note: "noted",
     });
     expect(out).toContain("# Timetable for 71 (L1)");
-    expect(out).toContain("- direction: 0");
+    expect(out).toContain("- direction: 0 (甲站 → 乙站)");
     expect(out).toContain("- mode: interval (timeTableType=2)");
     expect(out).toContain("- noted");
   });
 
-  test("mentions schedule entries when scheduled", () => {
+  test("renders the next departure and its source", () => {
     const out = renderTimetable({
-      line: { lineId: "", name: "", direction: 0, startSn: "", endSn: "" },
+      ...base,
       timeTableType: 1,
       mode: "scheduled",
-      timetable: [{}, {}, {}],
+      nextDeparture: "20:00",
+      nextDepartureSource: "yesterday-actual",
     });
-    expect(out).toContain("- 3 schedule entries");
+    expect(out).toContain("next departure from first stop: **20:00**");
+    expect(out).toContain("from yesterday's actual schedule");
   });
 
-  test("singular 'entry' for length 1", () => {
+  test("renders segment headways and yesterday's full-day list", () => {
     const out = renderTimetable({
-      line: { lineId: "", name: "", direction: 0, startSn: "", endSn: "" },
+      ...base,
       timeTableType: 1,
       mode: "scheduled",
-      timetable: [{}],
+      segments: [
+        {
+          fromTime: "06:30",
+          toTime: "10:00",
+          intervalMin: 18,
+          departures: ["06:30", "06:48"],
+        },
+      ],
+      yesterdayDepartures: ["06:30", "20:00", "21:00"],
     });
-    expect(out).toContain("- 1 schedule entry");
+    expect(out).toContain("06:30–10:00 every 18min: 06:30, 06:48");
+    expect(out).toContain("3 trips, ends 21:00");
   });
 });
 
@@ -779,6 +836,15 @@ describe("Input schemas", () => {
         direction: "1",
       }),
     ).not.toThrow();
+  });
+
+  test("TimetableInput at_time accepts HH:MM and rejects other shapes", () => {
+    const base = { city_id: "034", line_id: "L1", line_no: "71", direction: "1" };
+    expect(TimetableInput.parse({ ...base, at_time: "19:10" }).at_time).toBe("19:10");
+    expect(TimetableInput.parse({ ...base, at_time: "05:00" }).at_time).toBe("05:00");
+    for (const bad of ["24:00", "9:5", "1900", "19:60", ""]) {
+      expect(() => TimetableInput.parse({ ...base, at_time: bad })).toThrow();
+    }
   });
 
   test("RefreshInput requires line_stn", () => {
