@@ -18,6 +18,7 @@
 - [发车预测说明（本 fork 的改动）](#发车预测说明本-fork-的改动)
 - [配置](#配置)
 - [开发](#开发)
+- [贡献](#贡献)
 - [致谢](#致谢)
 - [免责声明](#免责声明)
 - [License](#license)
@@ -228,6 +229,18 @@ feat(timetable): add at_time argument
 fix(timetable): fall back to yesterday's schedule
 docs(readme): clarify coordinate systems
 ```
+
+## 贡献
+
+欢迎参与改进。
+
+- **提交 PR** —— 请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，其中说明了开发环境、
+  提交规范，以及「上游是唯一事实来源」「WGS-84 / GCJ-02 坐标约定」等必须遵守的约定。
+- **报告 Bug** —— 请使用 [Bug 报告模板](.github/ISSUE_TEMPLATE/bug_report.yml)。
+  提交前请把真实坐标、IP、住址替换成大致位置。
+- **上游接口变更** —— 车来了接口不是公开 API，随时可能变动。
+  若所有工具同时大面积返回 `status:400`，请用 [上游接口变更模板](.github/ISSUE_TEMPLATE/upstream_drift.yml) 反馈。
+- **报告安全漏洞** —— 不要开公开 Issue，请按 [SECURITY.md](SECURITY.md) 的流程私下提交。
 
 ## 致谢
 
